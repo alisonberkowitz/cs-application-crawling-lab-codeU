@@ -7,6 +7,7 @@ import java.util.Map.Entry;
 import java.util.Queue;
 
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
 import org.jsoup.select.Elements;
 
 import redis.clients.jedis.Jedis;
@@ -54,8 +55,24 @@ public class WikiCrawler {
 	 * @throws IOException
 	 */
 	public String crawl(boolean testing) throws IOException {
-        // FILL THIS IN!
-		return null;
+        String url = queue.poll();
+        System.out.println("Crawling " + url);
+        if (testing) {
+        	Elements paragraphs = wf.readWikipedia(url);
+			index.indexPage(url, paragraphs);
+			queueInternalLinks(paragraphs, testing);
+        }
+        else {
+        	if (index.isIndexed(url)) {
+        		return null;
+        	}
+        	else {
+        		Elements paragraphs = wf.fetchWikipedia(url);
+				index.indexPage(url, paragraphs);
+				queueInternalLinks(paragraphs, testing);
+        	}
+        }
+        return url;
 	}
 	
 	/**
@@ -64,9 +81,52 @@ public class WikiCrawler {
 	 * @param paragraphs
 	 */
 	// NOTE: absence of access level modifier means package-level
-	void queueInternalLinks(Elements paragraphs) {
-        // FILL THIS IN!
+	void queueInternalLinks(Elements paragraphs, boolean testing) {
+        int i = 0;
+		while (i<paragraphs.size()) {
+			Element firstPara = paragraphs.get(i);
+			Elements links = firstPara.select("a[href]");
+			for (Element element: links) {
+				String href = element.attr("href");
+				// link is not external, but not to the same page
+				if (href.startsWith("/wiki")) {
+					String absHref = element.attr("abs:href");
+					if (testing) {
+						absHref = "https://en.wikipedia.org" + href;
+					}
+					queue.offer(absHref);
+				}
+			}
+			i++;
+		}
 	}
+
+	private static boolean italicized(Element element) {
+    	Elements parents = element.parents();
+		boolean italics = false;
+		for (Element parent: parents) {
+			if (parent.tagName() == "i" || parent.tagName() == "em") {
+				italics = true;
+			}
+		}
+		return italics;
+    }
+
+    // checks if link is parenthesized in element
+    private static boolean parenthesized(Element element, Element link) {
+    	// if 0, parentheses are closed
+		int parentheses = 0;
+		String text = element.text();
+		int linkIndex = text.indexOf(link.text());
+		for (int i=0; i<linkIndex; i++) {
+			if (text.charAt(i)=='(') {
+				parentheses++;
+			} else if (text.charAt(i)==')') {
+				parentheses--;
+			}
+		}
+		return parentheses > 0;
+    }
 
 	public static void main(String[] args) throws IOException {
 		
@@ -78,15 +138,12 @@ public class WikiCrawler {
 		
 		// for testing purposes, load up the queue
 		Elements paragraphs = wf.fetchWikipedia(source);
-		wc.queueInternalLinks(paragraphs);
+		wc.queueInternalLinks(paragraphs, false);
 
 		// loop until we index a new page
 		String res;
 		do {
 			res = wc.crawl(false);
-
-            // REMOVE THIS BREAK STATEMENT WHEN crawl() IS WORKING
-            break;
 		} while (res == null);
 		
 		Map<String, Integer> map = index.getCounts("the");
